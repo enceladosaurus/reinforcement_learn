@@ -1,117 +1,184 @@
 import numpy as np
 import random
-
-
-
+import json
 
 test_state = np.array([
     [3, 3, 5],
     [3, 0, 5],
     [0, 0, 5]])
 
-class TicTacToe:
+class Environment:
 
-    def __init__(self, role: str, epsilon: float):
+    def __init__(self, X, O, state = np.zeros(9, dtype=int)):
+        self.state = state
+        self.X = X
+        self.O = O
+        self.done = False
+
+    def check_victory(self, agent):
+        print("Checking victory for:", agent.value)  
+        state = np.where(self.state == agent.value, 1, 0)
+        print(state)
+        if state[0] == state[1] == state[2] == 1:
+            return True
+        elif state[0] == state[3] == state[6] == 1:
+            return True
+        elif state[0] == state[4] == state[8] == 1:
+            return True
+        elif state[1] == state[4] == state[7] == 1:
+            return True
+        elif state[2] == state[5] == state[8] == 1:
+            return True
+        elif state[2] == state[4] == state[6] == 1:
+            return True
+        elif state[3] == state[4] == state[5] == 1:
+            return True
+        elif state[6] == state[7] == state[8] == 1:
+            return True
+        else:
+            return False
+    
+    def turn(self, agent):
+        if self.check_state():
+            current_state = self.state
+            new_state, action = agent.act(self.state)
+            self.state = new_state
+            print(self.state.reshape(3, 3))
+            if self.check_victory(agent):
+                print(f"VICTORY FOR {agent.role}")
+                reward = 100
+                agent.add_history(self.state, action, reward)
+                agent.victory = True
+                self.done = True
+            else:
+                reward = -1
+                agent.add_history(current_state, action, reward)
+
+    def check_state(self):
+        state = np.where(self.state == 0, 1, 0)
+        print("CHECKING STATE: ", state)
+        if sum(state) == 0:
+            self.done = True
+            print("GAME OVER")
+            return False
+        elif self.X.victory or self.O.victory:
+            return False
+        else:
+            return True
+
+    def play(self, first_player, second_player):
+        while not self.done:
+            self.turn(first_player)
+            self.turn(second_player)
+        first_player.update()
+        second_player.update()
+
+    def reset(self):
+        self.done = False
+        self.state = np.zeros(9, dtype=int)
+        self.X.victory = False
+        self.O.victory = False
+    
+    def train(self, n_games: 100):
+        X_victories = 0
+        O_victories = 0
+        draws = 0
+
+        for i in range(n_games):
+            print(f"Beginning game #{i}")
+            if random.uniform(0, 1) > 0.5:
+                print("X goes first")
+                first_player = self.X
+                second_player = self.O
+            else:
+                print("O goes first")
+                first_player = self.O
+                second_player = self.X
+            self.play(first_player, second_player)
+            if self.X.victory:
+                X_victories += 1
+            elif self.O.victory:
+                O_victories += 1
+            else:
+                draws += 1
+            self.reset()
         
-        self.moves = 0
-        self.state = np.zeros((3,3), dtype=int)
-        self.previous_state = None
+        print(f"X victories: {X_victories}")
+        print(f"O victories: {O_victories}")
+        print(f"Draws: {draws}")
+
+
+
+class Agent:
+
+    def __init__(self, role: str, epsilon: float, discount: float, learning_rate: float):
+        
+        self.victory = False
         self.role = role
         self.epsilon = epsilon
+        self.lr = learning_rate
         self.qtable = {}
         self.history = []
         self.total_reward = 0
-        self.done = False
+        self.discount = discount
         if self.role == "X":
             self.value = 5
         else:
             self.value = 3
 
-    def check_victory(self):
-        print("Checking victory")
-        if self.moves > 3: 
-            state = np.where(self.state == self.value, 0, 1).flatten()
-            print(state)
-            if state[0] == state[1] == state[2] == 1:
-                self.done = True
-                return True
-            elif state[0] == state[3] == state[6] == 1:
-                self.done = True
-                return True
-            elif state[0] == state[4] == state[8] == 1:
-                self.done = True
-                return True
-            elif state[1] == state[4] == state[7] == 1:
-                self.done = True
-                return True
-            elif state[2] == state[5] == state[8] == 1:
-                self.done = True
-                return True
-            elif state[2] == state[4] == state[6] == 1:
-                self.done = True
-                return True
-            elif state[3] == state[4] == state[5] == 1:
-                self.done = True
-                return True
-            elif state[6] == state[7] == state[8] == 1:
-                self.done = True
-                return True
-            else:
-                return False
     def act(self, state: np.array):
-        self.moves += 1
         if random.uniform(0, 1) > self.epsilon:
             print("EXPLOITATION")
-            current_state = state.flatten()
+            current_state = state
             key = str(current_state)
+            possible_actions = [i for i, x in enumerate(current_state) if x == 0]
+            print("Possible actions: ", possible_actions)   
             try: 
-                possible_actions = self.qtable[key]
+                actions = self.qtable[key]
+                max_value = -100
+                best_action = None
+                for action in actions:
+                    if self.qtable[key][action] > max_value:
+                        best_action = action
+                        max_value = self.qtable[key][action]
             except KeyError:
                 print("State not recorded, creating entry...")
-                self.qtable[key] = {}
-                current_state = state.flatten()
-                possible_actions = [i for i, x in enumerate(current_state) if x == 0]
-                print("Possible actions: ", possible_actions)
-                if len(possible_actions) == 0:
-                    self.done = True
-                    print("GAME OVER")
-                    return
+                self.qtable[key] = {}           
                 for i in possible_actions:
                     self.qtable[key][i] = random.uniform(0, 10)
                 best_action = possible_actions[0]
-            for k in self.qtable[key].keys():
-                if self.qtable[key][k] > best_action:
-                    best_action = k
+                for action in self.qtable[key].keys():
+                    if self.qtable[key][action] > best_action:
+                        best_action = action
             new_state = current_state.copy()
             new_state[best_action] = self.value
 
-            if self.check_victory():
-                self.total_reward += 100
-                reward = 100
-                self.done = True
-            else:
-                self.total_reward += -1
-                reward = -1
-            self._update_dict(key, best_action, reward)
-            new_state = np.array(new_state).reshape(3, 3)
-            self.previous_state = self.state
-            self.state = new_state
+            return new_state, best_action
 
         else:
+            print("EXPLORATION")
             new_state, action = self._randomact(state)
-            self.previous_state = self.state
-            self.state = new_state
-            if self.check_victory():
-                self.total_reward += 100
-                reward = 100
-                self.done = True
-            else:
-                self.total_reward += -1
-                reward = -1
-            self._update_dict(str(state.flatten()), action, reward)
+
+            return new_state, action 
             
-    def _update_dict(self, state, action, reward):
-        self.history.append((state, action, reward))
+    def add_history(self, state, action, reward):
+        self.history.append((str(state), action, reward))
+
+    def update(self):
+        history = self.history
+        history.reverse()
+        for i in range(len(history)):
+            state, action, reward = history[i]
+            if i == 0:
+                self._update_qtable(state, action, reward)
+            else:
+                future_state = history[i-1][0]
+                max_value = max(list(self.qtable[future_state].values()))
+            
+                q_value = reward + self.discount * (max_value)
+                self._update_qtable(state, action, q_value)
+       
+    def _update_qtable(self, state, action, reward):
         try:
             self.qtable[state][action] = reward
         except KeyError:
@@ -119,7 +186,7 @@ class TicTacToe:
             self.qtable[state][action] = reward
 
     def _randomact(self, state):
-        current_state = state.flatten()
+        current_state = state
         possible_actions = [i for i, x in enumerate(current_state) if x == 0]
         if len(possible_actions) > 1:
             action = random.randint(0, len(possible_actions)-1)
@@ -130,10 +197,15 @@ class TicTacToe:
         new_state = current_state.copy()
         new_state[action] = self.value
         
-        return np.array(new_state).reshape(3,3), action
+        return new_state, action
+    
+    def save(self):
+        with open(f"./model{self.role}", "w") as f:
+            json.dump(self.qtable)
 
-test_agent = TicTacToe("X", 0.5)
 
-while not test_agent.done:
-    test_agent.act(test_agent.state)
-    print(test_agent.state)
+agentX = Agent("X", 0.5, 0.99, 0.99)
+agentO = Agent("O", 0.5, 0.99, 0.99)
+
+game = Environment(agentX, agentO)
+game.train(n_games = 100)
