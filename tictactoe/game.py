@@ -2,12 +2,7 @@ import numpy as np
 import random
 import json
 
-test_state = np.array([
-    [3, 3, 5],
-    [3, 0, 5],
-    [0, 0, 5]])
-
-class Environment:
+class TicTacToe:
 
     def __init__(self, X, O, state = np.zeros(9, dtype=int)):
         self.state = state
@@ -107,8 +102,6 @@ class Environment:
         print(f"O victories: {O_victories}")
         print(f"Draws: {draws}")
 
-
-
 class Agent:
 
     def __init__(self, role: str, epsilon: float, discount: float, learning_rate: float):
@@ -207,5 +200,11 @@ class Agent:
 agentX = Agent("X", 0.5, 0.99, 0.99)
 agentO = Agent("O", 0.5, 0.99, 0.99)
 
-game = Environment(agentX, agentO)
+game = TicTacToe(agentX, agentO)
 game.train(n_games = 100)
+
+
+# Have mode where you can play the computer
+# Save model training
+# Epsilon decay
+#
