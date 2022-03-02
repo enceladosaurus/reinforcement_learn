@@ -1,18 +1,21 @@
 import numpy as np
 import random
 import json
+import os
 
 class TicTacToe:
 
-    def __init__(self, X, O, state = np.zeros(9, dtype=int)):
+    def __init__(self, X, O, mode: str, state = np.zeros(9, dtype=int)):
         self.state = state
         self.X = X
         self.O = O
+        self.mode = mode
         self.done = False
 
-    def check_victory(self, agent):
-        print("Checking victory for:", agent.value)  
-        state = np.where(self.state == agent.value, 1, 0)
+    def check_victory(self, player):
+
+        print("Checking victory for:", player.value)  
+        state = np.where(self.state == player.value, 1, 0)
         print(state)
         if state[0] == state[1] == state[2] == 1:
             return True
@@ -33,7 +36,7 @@ class TicTacToe:
         else:
             return False
     
-    def turn(self, agent):
+    def agent_turn(self, agent):
         if self.check_state():
             current_state = self.state
             new_state, action = agent.act(self.state)
@@ -48,10 +51,36 @@ class TicTacToe:
             else:
                 reward = -1
                 agent.add_history(current_state, action, reward)
+    
+    def human_turn(self, human):
 
-    def check_state(self):
+        if self.check_state():
+
+            if self.check_victory(human):
+                print(f"VICTORY FOR {human.role}")
+                human.victory = True
+                self.done = True
+            else:
+                print("CURRENT STATE:")
+                print(self.state.reshape(3, 3))
+                # Show in X and O
+                print("What is the index of your move?")
+                action = input()
+                new_state = self.state.copy()
+                assert(new_state[int(action)] == 0), "STOP CHEATING!"
+                new_state[int(action)] = human.value
+                self.state = new_state
+
+    def check_state(self) -> bool:
+        """
+        Check if the board is full (end-condition for the game).
+
+        Returns
+        -------
+        bool: True if game continues, False if game ends
+        """
         state = np.where(self.state == 0, 1, 0)
-        print("CHECKING STATE: ", state)
+        print("CHECKING STATE: ", self.state)
         if sum(state) == 0:
             self.done = True
             print("GAME OVER")
@@ -62,11 +91,18 @@ class TicTacToe:
             return True
 
     def play(self, first_player, second_player):
-        while not self.done:
-            self.turn(first_player)
-            self.turn(second_player)
-        first_player.update()
-        second_player.update()
+        if self.mode == "train":
+            while not self.done:
+                self.agent_turn(first_player)
+                self.agent_turn(second_player)
+            first_player.update()
+            second_player.update()
+        else:
+            while not self.done:
+                self.agent_turn(first_player)
+                self.human_turn(second_player)
+            first_player.update()
+            first_player.save()
 
     def reset(self):
         self.done = False
@@ -96,21 +132,36 @@ class TicTacToe:
                 O_victories += 1
             else:
                 draws += 1
+            first_player.save()
+            second_player.save()
             self.reset()
         
         print(f"X victories: {X_victories}")
         print(f"O victories: {O_victories}")
         print(f"Draws: {draws}")
 
+class Human:
+
+    def __init__(self, role: str) -> None:
+        self.role = role
+        if self.role == "X":
+            self.value = 5
+        else:
+            self.value = 3
+        
+        self.victory = False
+
+
 class Agent:
 
-    def __init__(self, role: str, epsilon: float, discount: float, learning_rate: float):
+    def __init__(
+        self, role: str, epsilon: float, 
+        discount: float, learning_rate: float):
         
         self.victory = False
         self.role = role
         self.epsilon = epsilon
         self.lr = learning_rate
-        self.qtable = {}
         self.history = []
         self.total_reward = 0
         self.discount = discount
@@ -119,6 +170,20 @@ class Agent:
         else:
             self.value = 3
 
+        model_path = f"./tictactoe/models/model{self.role}.json"
+
+        if os.path.exists(model_path):
+            print("Previous model found. Loading....")
+            self.load_model()
+        else:
+            print("No model found. Creating blank Q-table")
+            self.qtable = {}
+    
+    def load_model(self):
+
+        with open(f"./tictactoe/models/model{self.role}.json", "r") as f:
+            self.qtable = json.load(f)
+
     def act(self, state: np.array):
         if random.uniform(0, 1) > self.epsilon:
             print("EXPLOITATION")
@@ -126,7 +191,7 @@ class Agent:
             key = str(current_state)
             possible_actions = [i for i, x in enumerate(current_state) if x == 0]
             print("Possible actions: ", possible_actions)   
-            try: 
+            if key in self.qtable.keys(): 
                 actions = self.qtable[key]
                 max_value = -100
                 best_action = None
@@ -134,7 +199,7 @@ class Agent:
                     if self.qtable[key][action] > max_value:
                         best_action = action
                         max_value = self.qtable[key][action]
-            except KeyError:
+            else:
                 print("State not recorded, creating entry...")
                 self.qtable[key] = {}           
                 for i in possible_actions:
@@ -144,7 +209,7 @@ class Agent:
                     if self.qtable[key][action] > best_action:
                         best_action = action
             new_state = current_state.copy()
-            new_state[best_action] = self.value
+            new_state[int(best_action)] = self.value
 
             return new_state, best_action
 
@@ -154,7 +219,7 @@ class Agent:
 
             return new_state, action 
             
-    def add_history(self, state, action, reward):
+    def add_history(self, state: np.array, action: int, reward: float):
         self.history.append((str(state), action, reward))
 
     def update(self):
@@ -171,10 +236,12 @@ class Agent:
                 q_value = reward + self.discount * (max_value)
                 self._update_qtable(state, action, q_value)
        
-    def _update_qtable(self, state, action, reward):
-        try:
+    def _update_qtable(self, state: str, action: int, reward: float):
+
+        if state in self.qtable.keys():
             self.qtable[state][action] = reward
-        except KeyError:
+        
+        else:
             self.qtable[state] = {}
             self.qtable[state][action] = reward
 
@@ -193,18 +260,17 @@ class Agent:
         return new_state, action
     
     def save(self):
-        with open(f"./model{self.role}", "w") as f:
-            json.dump(self.qtable)
+        with open(f"./tictactoe/models/model{self.role}.json", "w") as f:
+            json.dump(self.qtable, f)
 
 
 agentX = Agent("X", 0.5, 0.99, 0.99)
-agentO = Agent("O", 0.5, 0.99, 0.99)
+#agentO = Agent("O", 0.5, 0.99, 0.99)
+agentO = Human("O")
+game = TicTacToe(agentX, agentO, mode="play")
+#game.train(n_games = 100)
+game.play(agentX, agentO)
 
-game = TicTacToe(agentX, agentO)
-game.train(n_games = 100)
-
-
-# Have mode where you can play the computer
-# Save model training
 # Epsilon decay
-#
+# Replace prints and shit with logging
+# Document your damn code
